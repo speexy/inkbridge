@@ -32,6 +32,8 @@ final class MacOSVirtualMouse {
     private var lastButton:  Int = 0
     private var lastSampleTime: Date = .distantPast
     private var lastEraserKey: Bool = false
+    private var nextExcalidrawCheck: Date = .distantPast
+    private let excalidrawRecheckInterval: TimeInterval = 0.25
 
     init(displayFrame: CGRect) {
         guard let src = CGEventSource(stateID: .hidSystemState) else {
@@ -68,16 +70,22 @@ final class MacOSVirtualMouse {
         self.tiltY = Double(tiltY)
         self.pressure = Float(rawPressure) / 4095.0
 
-        if excalidrawMode && eraser != lastEraserKey {
-            lastEraserKey = eraser
+        // lastEraserKey is the tool Excalidraw last received, so a flip made
+        // while another window was focused is delivered once Excalidraw is back.
+        if excalidrawMode && eraser != lastEraserKey && now >= nextExcalidrawCheck {
             if frontmostWindowIsExcalidraw() {
+                lastEraserKey = eraser
                 sendKeystroke(virtualKey: eraser ? eraserEnterKey : eraserLeaveKey)
                 if logEvents {
                     let k = eraser ? eraserEnterKey : eraserLeaveKey
                     print("  excalidraw: keystroke 0x\(String(format:"%02x", k)) (\(eraser ? "→eraser" : "→pen"))")
                 }
-            } else if logEvents {
-                print("  excalidraw: frontmost window is not Excalidraw, keystroke skipped")
+            } else {
+                // Reports arrive hundreds of times a second; don't query AX on each.
+                nextExcalidrawCheck = now.addingTimeInterval(excalidrawRecheckInterval)
+                if logEvents {
+                    print("  excalidraw: frontmost window is not Excalidraw, keystroke deferred")
+                }
             }
         }
 
