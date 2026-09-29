@@ -7,7 +7,10 @@ final class InkFlowController {
     enum ConnectionState {
         case disconnected
         case connected(name: String, serial: String?)
+        case busy
     }
+
+    private static let retryInterval: TimeInterval = 2.0
 
     private(set) var state: ConnectionState = .disconnected {
         didSet { onStateChange?(state) }
@@ -25,6 +28,7 @@ final class InkFlowController {
     private var mvm: MacOSVirtualMouse?
     private var hid: SupernoteHID?
     private var screenChangeObserver: NSObjectProtocol?
+    private var retryTimer: Timer?
 
     init() {
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -60,13 +64,26 @@ final class InkFlowController {
             try hid.start()
             self.mvm = mvm
             self.hid = hid
+            retryTimer?.invalidate()
+            retryTimer = nil
+            if case .busy = state { state = .disconnected }
         } catch {
             NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
-            state = .disconnected
+            state = .busy
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: Self.retryInterval, repeats: true) { [weak self] _ in
+            self?.start()
         }
     }
 
     func stop() {
+        retryTimer?.invalidate()
+        retryTimer = nil
         hid?.stop()
         hid = nil
         mvm = nil

@@ -82,21 +82,28 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             statusItem.button?.image = Self.menuBarImage(connected: false)
             statusItem.button?.image?.isTemplate = true
         case .connected(let name, let serial):
-            statusMenuItem.attributedTitle = Self.connectedTitle(name: name, serial: serial)
+            statusMenuItem.attributedTitle = Self.twoLineTitle("Connected: \(name)", detail: serial)
             statusItem.button?.image = Self.menuBarImage(connected: true)
+            statusItem.button?.image?.isTemplate = true
+        case .busy:
+            statusMenuItem.attributedTitle = Self.twoLineTitle(
+                "Supernote in use by another app",
+                detail: "Close Supernote Partner — retrying…"
+            )
+            statusItem.button?.image = Self.menuBarImage(connected: false)
             statusItem.button?.image?.isTemplate = true
         }
     }
 
-    private static func connectedTitle(name: String, serial: String?) -> NSAttributedString {
+    private static func twoLineTitle(_ primary: String, detail: String?) -> NSAttributedString {
         let title = NSMutableAttributedString()
         title.append(NSAttributedString(
-            string: "Connected: \(name)",
+            string: primary,
             attributes: [.font: NSFont.menuFont(ofSize: 0)]
         ))
-        if let serial = serial, !serial.isEmpty {
+        if let detail = detail, !detail.isEmpty {
             title.append(NSAttributedString(
-                string: "\n\(serial)",
+                string: "\n\(detail)",
                 attributes: [
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
                     .foregroundColor: NSColor.secondaryLabelColor,
