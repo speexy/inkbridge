@@ -92,6 +92,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             )
             statusItem.button?.image = Self.menuBarImage(connected: false)
             statusItem.button?.image?.isTemplate = true
+        case .openFailed(let code):
+            statusMenuItem.attributedTitle = Self.twoLineTitle(
+                "Couldn't open Supernote",
+                detail: "Error \(code) — retrying…"
+            )
+            statusItem.button?.image = Self.menuBarImage(connected: false)
+            statusItem.button?.image?.isTemplate = true
         }
     }
 

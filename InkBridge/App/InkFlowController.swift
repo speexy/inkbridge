@@ -8,9 +8,11 @@ final class InkFlowController {
         case disconnected
         case connected(name: String, serial: String?)
         case busy
+        case openFailed(code: String)
     }
 
     private static let retryInterval: TimeInterval = 2.0
+    private static let arrivalReopenCooldown: TimeInterval = 5.0
 
     private(set) var state: ConnectionState = .disconnected {
         didSet { onStateChange?(state) }
@@ -29,6 +31,7 @@ final class InkFlowController {
     private var hid: SupernoteHID?
     private var screenChangeObserver: NSObjectProtocol?
     private var retryTimer: Timer?
+    private var lastArrivalReopen: Date = .distantPast
 
     init() {
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -59,6 +62,17 @@ final class InkFlowController {
         hid.onRemoved = { [weak self] _ in
             self?.state = .disconnected
         }
+        hid.onArrivedAfterOpen = { [weak self] in
+            guard let self else { return false }
+            // Rate-limited so a device that never shows up in the open set
+            // can't cause a reopen loop.
+            let now = Date()
+            guard now.timeIntervalSince(self.lastArrivalReopen) > Self.arrivalReopenCooldown else { return false }
+            self.lastArrivalReopen = now
+            // Deferred: we're inside the old manager's callback.
+            DispatchQueue.main.async { self.restart() }
+            return true
+        }
 
         do {
             try hid.start()
@@ -66,12 +80,24 @@ final class InkFlowController {
             self.hid = hid
             retryTimer?.invalidate()
             retryTimer = nil
-            if case .busy = state { state = .disconnected }
+            switch state {
+            case .busy, .openFailed: state = .disconnected
+            default: break
+            }
         } catch {
             NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
-            state = .busy
+            if let openError = error as? SupernoteHID.OpenError, !openError.isExclusiveAccess {
+                state = .openFailed(code: openError.hexCode)
+            } else {
+                state = .busy
+            }
             scheduleRetry()
         }
+    }
+
+    private func restart() {
+        stop()
+        start()
     }
 
     private func scheduleRetry() {

@@ -4,6 +4,16 @@ import IOKit
 import IOKit.hid
 
 final class SupernoteHID {
+    struct OpenError: LocalizedError {
+        let code: IOReturn
+        var isExclusiveAccess: Bool { code == kIOReturnExclusiveAccess }
+        var hexCode: String { String(format: "0x%08x", UInt32(bitPattern: code)) }
+        var errorDescription: String? {
+            "IOHIDManagerOpen with seize failed: \(hexCode)." +
+                (isExclusiveAccess ? " Another app (e.g. Supernote Partner) is holding the device." : "")
+        }
+    }
+
     static let VID = 0x2207
     static let PID = 0x0007
 
@@ -15,6 +25,9 @@ final class SupernoteHID {
     var verbose: Bool = false
     var onMatched: ((IOHIDDevice) -> Void)?
     var onRemoved: ((IOHIDDevice) -> Void)?
+    /// Return true if the caller will reopen; the device is then ignored here.
+    var onArrivedAfterOpen: (() -> Bool)?
+    private var devicesAtOpen: Set<IOHIDDevice> = []
     private var rateCount: Int = 0
     private var lastRateReport: Date = Date()
     private(set) var matchedDeviceCount: Int = 0
@@ -44,19 +57,21 @@ final class SupernoteHID {
         guard res == kIOReturnSuccess else {
             // A failed open can still leave some matched devices open.
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-            throw NSError(domain: "IOHID", code: Int(res), userInfo: [
-                NSLocalizedDescriptionKey:
-                    "IOHIDManagerOpen with seize failed: 0x\(String(format:"%08x", res)). " +
-                    "Another app (e.g. Supernote Partner) may be holding the device."
-            ])
+            throw OpenError(code: res)
         }
 
+        devicesAtOpen = (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? []
         let runLoop = CFRunLoopGetCurrent()!
         IOHIDManagerScheduleWithRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
         scheduledRunLoop = runLoop
     }
 
     fileprivate func handleMatched(_ device: IOHIDDevice) {
+        // IOHIDManager silently fails to seize devices that arrive after
+        // IOHIDManagerOpen; a reopen surfaces that as an OpenError instead.
+        if !devicesAtOpen.contains(device), onArrivedAfterOpen?() == true {
+            return
+        }
         matchedDeviceCount += 1
         print("attached: Supernote (\(matchedDeviceCount) total)")
         let ctx = Unmanaged.passUnretained(self).toOpaque()
