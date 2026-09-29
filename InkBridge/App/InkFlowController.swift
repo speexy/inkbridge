@@ -4,15 +4,43 @@ import CoreGraphics
 
 final class InkFlowController {
 
-    enum ConnectionState {
+    enum ConnectionState: Equatable {
         case disconnected
         case connected(name: String, serial: String?)
         case busy
         case openFailed(code: String)
+
+        static func afterFailedOpen(_ error: Error) -> ConnectionState {
+            if let openError = error as? SupernoteHID.OpenError, !openError.isExclusiveAccess {
+                return .openFailed(code: openError.hexCode)
+            }
+            return .busy
+        }
+
+        func afterSuccessfulOpen() -> ConnectionState {
+            switch self {
+            case .busy, .openFailed: return .disconnected
+            default: return self
+            }
+        }
+    }
+
+    /// Limits reopens triggered by late-arriving devices, so a device that
+    /// never shows up in the open set can't cause a reopen loop.
+    struct ReopenLimiter {
+        let cooldown: TimeInterval
+        private var lastReopen: Date = .distantPast
+
+        init(cooldown: TimeInterval) { self.cooldown = cooldown }
+
+        mutating func allowReopen(at now: Date) -> Bool {
+            guard now.timeIntervalSince(lastReopen) > cooldown else { return false }
+            lastReopen = now
+            return true
+        }
     }
 
     private static let retryInterval: TimeInterval = 2.0
-    private static let arrivalReopenCooldown: TimeInterval = 5.0
 
     private(set) var state: ConnectionState = .disconnected {
         didSet { onStateChange?(state) }
@@ -31,7 +59,7 @@ final class InkFlowController {
     private var hid: SupernoteHID?
     private var screenChangeObserver: NSObjectProtocol?
     private var retryTimer: Timer?
-    private var lastArrivalReopen: Date = .distantPast
+    private var arrivalReopenLimiter = ReopenLimiter(cooldown: 5.0)
 
     init() {
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -63,12 +91,7 @@ final class InkFlowController {
             self?.state = .disconnected
         }
         hid.onArrivedAfterOpen = { [weak self] in
-            guard let self else { return false }
-            // Rate-limited so a device that never shows up in the open set
-            // can't cause a reopen loop.
-            let now = Date()
-            guard now.timeIntervalSince(self.lastArrivalReopen) > Self.arrivalReopenCooldown else { return false }
-            self.lastArrivalReopen = now
+            guard let self, self.arrivalReopenLimiter.allowReopen(at: Date()) else { return false }
             // Deferred: we're inside the old manager's callback.
             DispatchQueue.main.async { self.restart() }
             return true
@@ -80,17 +103,11 @@ final class InkFlowController {
             self.hid = hid
             retryTimer?.invalidate()
             retryTimer = nil
-            switch state {
-            case .busy, .openFailed: state = .disconnected
-            default: break
-            }
+            let next = state.afterSuccessfulOpen()
+            if next != state { state = next }
         } catch {
             NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
-            if let openError = error as? SupernoteHID.OpenError, !openError.isExclusiveAccess {
-                state = .openFailed(code: openError.hexCode)
-            } else {
-                state = .busy
-            }
+            state = .afterFailedOpen(error)
             scheduleRetry()
         }
     }
