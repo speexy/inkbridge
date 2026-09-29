@@ -1,4 +1,5 @@
-import Foundation
+import AppKit
+import ApplicationServices
 import CoreGraphics
 
 final class MacOSVirtualMouse {
@@ -69,10 +70,14 @@ final class MacOSVirtualMouse {
 
         if excalidrawMode && eraser != lastEraserKey {
             lastEraserKey = eraser
-            sendKeystroke(virtualKey: eraser ? eraserEnterKey : eraserLeaveKey)
-            if logEvents {
-                let k = eraser ? eraserEnterKey : eraserLeaveKey
-                print("  excalidraw: keystroke 0x\(String(format:"%02x", k)) (\(eraser ? "→eraser" : "→pen"))")
+            if frontmostWindowIsExcalidraw() {
+                sendKeystroke(virtualKey: eraser ? eraserEnterKey : eraserLeaveKey)
+                if logEvents {
+                    let k = eraser ? eraserEnterKey : eraserLeaveKey
+                    print("  excalidraw: keystroke 0x\(String(format:"%02x", k)) (\(eraser ? "→eraser" : "→pen"))")
+                }
+            } else if logEvents {
+                print("  excalidraw: frontmost window is not Excalidraw, keystroke skipped")
             }
         }
 
@@ -177,6 +182,22 @@ final class MacOSVirtualMouse {
 
     private func refreshCachedEvent() {
         if let ev = CGEvent(source: eventSource) { cachedEvent = ev }
+    }
+
+    // Excalidraw usually runs in a browser tab, so match the focused window's
+    // title rather than the app's bundle ID.
+    private func frontmostWindowIsExcalidraw() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        // Called from the pen-input callback; don't let a hung app stall input.
+        AXUIElementSetMessagingTimeout(axApp, 0.1)
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let window else { return false }
+        var title: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success,
+              let title = title as? String else { return false }
+        return title.localizedCaseInsensitiveContains("excalidraw")
     }
 
     private func sendKeystroke(virtualKey: CGKeyCode) {
