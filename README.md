@@ -21,4 +21,12 @@ open InkBridge.xcodeproj
 
 Requires Xcode 15+ and macOS 13+. Ad-hoc signed by default.
 
+## Tests
+
+```
+swift test
+```
+
+Uses Swift Testing through `Package.swift`, which exists only for tests. It works with just the Command Line Tools. The app itself is still built from the Xcode project. Tests must not post real input events, so keep testable logic free of CGEvent/IOKit side effects.
+
 ## Not affiliated with Ratta / Supernote.
