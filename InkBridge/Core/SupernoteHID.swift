@@ -18,6 +18,7 @@ final class SupernoteHID {
     private var rateCount: Int = 0
     private var lastRateReport: Date = Date()
     private(set) var matchedDeviceCount: Int = 0
+    private var scheduledRunLoop: CFRunLoop?
 
     init(mvm: MacOSVirtualMouse) {
         self.mvm = mvm
@@ -41,15 +42,18 @@ final class SupernoteHID {
 
         let res = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
         guard res == kIOReturnSuccess else {
+            // A failed open can still leave some matched devices open.
+            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             throw NSError(domain: "IOHID", code: Int(res), userInfo: [
                 NSLocalizedDescriptionKey:
                     "IOHIDManagerOpen with seize failed: 0x\(String(format:"%08x", res)). " +
-                    "Another app may be holding the device — try unplugging the Supernote and re-launching InkBridge."
+                    "Another app (e.g. Supernote Partner) may be holding the device."
             ])
         }
 
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(),
-                                        CFRunLoopMode.defaultMode.rawValue)
+        let runLoop = CFRunLoopGetCurrent()!
+        IOHIDManagerScheduleWithRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        scheduledRunLoop = runLoop
     }
 
     fileprivate func handleMatched(_ device: IOHIDDevice) {
@@ -90,7 +94,10 @@ final class SupernoteHID {
     }
 
     func stop() {
-        IOHIDManagerClose(manager, 0)
+        guard let runLoop = scheduledRunLoop else { return }
+        IOHIDManagerUnscheduleFromRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        scheduledRunLoop = nil
     }
 }
 
