@@ -88,14 +88,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .busy:
             statusMenuItem.attributedTitle = Self.twoLineTitle(
                 "Supernote in use by another app",
-                detail: "Close Supernote Partner — retrying…"
+                detail: "Quit it (e.g. Supernote Partner), then unplug and replug the Supernote"
             )
             statusItem.button?.image = Self.menuBarImage(connected: false)
             statusItem.button?.image?.isTemplate = true
         case .openFailed(let code):
             statusMenuItem.attributedTitle = Self.twoLineTitle(
-                "Couldn't open Supernote",
-                detail: "Error \(code) — retrying…"
+                "Couldn't open Supernote (error \(code))",
+                detail: "Unplug and replug the Supernote"
             )
             statusItem.button?.image = Self.menuBarImage(connected: false)
             statusItem.button?.image?.isTemplate = true

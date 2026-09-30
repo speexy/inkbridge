@@ -25,21 +25,6 @@ final class InkFlowController {
         }
     }
 
-    /// Limits reopens triggered by late-arriving devices, so a device that
-    /// never shows up in the open set can't cause a reopen loop.
-    struct ReopenLimiter {
-        let cooldown: TimeInterval
-        private var lastReopen: Date = .distantPast
-
-        init(cooldown: TimeInterval) { self.cooldown = cooldown }
-
-        mutating func allowReopen(at now: Date) -> Bool {
-            guard now.timeIntervalSince(lastReopen) > cooldown else { return false }
-            lastReopen = now
-            return true
-        }
-    }
-
     private static let retryInterval: TimeInterval = 2.0
 
     private(set) var state: ConnectionState = .disconnected {
@@ -59,7 +44,6 @@ final class InkFlowController {
     private var hid: SupernoteHID?
     private var screenChangeObserver: NSObjectProtocol?
     private var retryTimer: Timer?
-    private var arrivalReopenLimiter = ReopenLimiter(cooldown: 5.0)
 
     init() {
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -90,12 +74,6 @@ final class InkFlowController {
         hid.onRemoved = { [weak self] _ in
             self?.state = .disconnected
         }
-        hid.onArrivedAfterOpen = { [weak self] in
-            guard let self, self.arrivalReopenLimiter.allowReopen(at: Date()) else { return false }
-            // Deferred: we're inside the old manager's callback.
-            DispatchQueue.main.async { self.restart() }
-            return true
-        }
 
         do {
             try hid.start()
@@ -110,11 +88,6 @@ final class InkFlowController {
             state = .afterFailedOpen(error)
             scheduleRetry()
         }
-    }
-
-    private func restart() {
-        stop()
-        start()
     }
 
     private func scheduleRetry() {

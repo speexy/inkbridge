@@ -25,9 +25,6 @@ final class SupernoteHID {
     var verbose: Bool = false
     var onMatched: ((IOHIDDevice) -> Void)?
     var onRemoved: ((IOHIDDevice) -> Void)?
-    /// Return true if the caller will reopen; the device is then ignored here.
-    var onArrivedAfterOpen: (() -> Bool)?
-    private var devicesAtOpen: Set<IOHIDDevice> = []
     private var rateCount: Int = 0
     private var lastRateReport: Date = Date()
     private(set) var matchedDeviceCount: Int = 0
@@ -60,18 +57,12 @@ final class SupernoteHID {
             throw OpenError(code: res)
         }
 
-        devicesAtOpen = (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? []
         let runLoop = CFRunLoopGetCurrent()!
         IOHIDManagerScheduleWithRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
         scheduledRunLoop = runLoop
     }
 
     fileprivate func handleMatched(_ device: IOHIDDevice) {
-        // IOHIDManager silently fails to seize devices that arrive after
-        // IOHIDManagerOpen; a reopen surfaces that as an OpenError instead.
-        if !devicesAtOpen.contains(device), onArrivedAfterOpen?() == true {
-            return
-        }
         matchedDeviceCount += 1
         print("attached: Supernote (\(matchedDeviceCount) total)")
         let ctx = Unmanaged.passUnretained(self).toOpaque()

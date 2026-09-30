@@ -31,37 +31,3 @@ import Testing
         #expect(state.afterSuccessfulOpen() == state)
     }
 }
-
-@Suite struct ReopenLimiterTests {
-    let start = Date(timeIntervalSinceReferenceDate: 1_000)
-
-    @Test func firstReopenIsAllowed() {
-        var limiter = InkFlowController.ReopenLimiter(cooldown: 5)
-        let allowed = limiter.allowReopen(at: start)
-        #expect(allowed)
-    }
-
-    @Test func reopenWithinCooldownIsRefused() {
-        var limiter = InkFlowController.ReopenLimiter(cooldown: 5)
-        _ = limiter.allowReopen(at: start)
-        let allowedAfter1s = limiter.allowReopen(at: start.addingTimeInterval(1))
-        #expect(!allowedAfter1s)
-        let allowedAt5s = limiter.allowReopen(at: start.addingTimeInterval(5))
-        #expect(!allowedAt5s)
-    }
-
-    @Test func reopenAfterCooldownIsAllowedAgain() {
-        var limiter = InkFlowController.ReopenLimiter(cooldown: 5)
-        _ = limiter.allowReopen(at: start)
-        let allowed = limiter.allowReopen(at: start.addingTimeInterval(5.1))
-        #expect(allowed)
-    }
-
-    @Test func refusedAttemptsDoNotExtendTheCooldown() {
-        var limiter = InkFlowController.ReopenLimiter(cooldown: 5)
-        _ = limiter.allowReopen(at: start)
-        _ = limiter.allowReopen(at: start.addingTimeInterval(4))
-        let allowed = limiter.allowReopen(at: start.addingTimeInterval(5.1))
-        #expect(allowed)
-    }
-}
