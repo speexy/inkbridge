@@ -1,4 +1,5 @@
-import Foundation
+import AppKit
+import ApplicationServices
 import CoreGraphics
 
 final class MacOSVirtualMouse {
@@ -30,7 +31,7 @@ final class MacOSVirtualMouse {
     private var isSetEraser: Bool = false
     private var lastButton:  Int = 0
     private var lastSampleTime: Date = .distantPast
-    private var lastEraserKey: Bool = false
+    private var excalidrawSync = ExcalidrawToolSync()
 
     init(displayFrame: CGRect) {
         guard let src = CGEventSource(stateID: .hidSystemState) else {
@@ -67,12 +68,21 @@ final class MacOSVirtualMouse {
         self.tiltY = Double(tiltY)
         self.pressure = Float(rawPressure) / 4095.0
 
-        if excalidrawMode && eraser != lastEraserKey {
-            lastEraserKey = eraser
-            sendKeystroke(virtualKey: eraser ? eraserEnterKey : eraserLeaveKey)
-            if logEvents {
-                let k = eraser ? eraserEnterKey : eraserLeaveKey
-                print("  excalidraw: keystroke 0x\(String(format:"%02x", k)) (\(eraser ? "→eraser" : "→pen"))")
+        if excalidrawMode {
+            switch excalidrawSync.update(eraser: eraser, now: now,
+                                         isExcalidrawFocused: frontmostWindowIsExcalidraw) {
+            case .send(let toEraser):
+                let k = toEraser ? eraserEnterKey : eraserLeaveKey
+                sendKeystroke(virtualKey: k)
+                if logEvents {
+                    print("  excalidraw: keystroke 0x\(String(format:"%02x", k)) (\(toEraser ? "→eraser" : "→pen"))")
+                }
+            case .deferred:
+                if logEvents {
+                    print("  excalidraw: frontmost window is not Excalidraw, keystroke deferred")
+                }
+            case .nothing:
+                break
             }
         }
 
@@ -179,6 +189,22 @@ final class MacOSVirtualMouse {
         if let ev = CGEvent(source: eventSource) { cachedEvent = ev }
     }
 
+    // Excalidraw usually runs in a browser tab, so match the focused window's
+    // title rather than the app's bundle ID.
+    private func frontmostWindowIsExcalidraw() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        // Called from the pen-input callback; don't let a hung app stall input.
+        AXUIElementSetMessagingTimeout(axApp, 0.1)
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let window else { return false }
+        var title: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success,
+              let title = title as? String else { return false }
+        return ExcalidrawToolSync.isExcalidrawTitle(title)
+    }
+
     private func sendKeystroke(virtualKey: CGKeyCode) {
         let down = CGEvent(keyboardEventSource: eventSource, virtualKey: virtualKey, keyDown: true)
         let up   = CGEvent(keyboardEventSource: eventSource, virtualKey: virtualKey, keyDown: false)
@@ -214,5 +240,35 @@ final class MacOSVirtualMouse {
         case .otherMouseDragged: return "otherMouseDragged"
         default:                 return "type(\(t.rawValue))"
         }
+    }
+}
+
+/// Decides when to send Excalidraw's pen/eraser key. It remembers the tool
+/// Excalidraw last received, so a flip made while another window was focused
+/// is delivered once Excalidraw is focused again.
+struct ExcalidrawToolSync {
+    enum Decision: Equatable {
+        case nothing
+        case send(eraser: Bool)
+        case deferred
+    }
+
+    /// Reports arrive hundreds of times a second; don't query AX on each.
+    var recheckInterval: TimeInterval = 0.25
+    private(set) var lastSentEraser = false
+    private var nextCheck: Date = .distantPast
+
+    static func isExcalidrawTitle(_ title: String) -> Bool {
+        title.localizedCaseInsensitiveContains("excalidraw")
+    }
+
+    mutating func update(eraser: Bool, now: Date, isExcalidrawFocused: () -> Bool) -> Decision {
+        guard eraser != lastSentEraser, now >= nextCheck else { return .nothing }
+        guard isExcalidrawFocused() else {
+            nextCheck = now.addingTimeInterval(recheckInterval)
+            return .deferred
+        }
+        lastSentEraser = eraser
+        return .send(eraser: eraser)
     }
 }
