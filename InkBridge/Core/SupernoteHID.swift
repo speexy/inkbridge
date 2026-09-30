@@ -4,6 +4,16 @@ import IOKit
 import IOKit.hid
 
 final class SupernoteHID {
+    struct OpenError: LocalizedError {
+        let code: IOReturn
+        var isExclusiveAccess: Bool { code == kIOReturnExclusiveAccess }
+        var hexCode: String { String(format: "0x%08x", UInt32(bitPattern: code)) }
+        var errorDescription: String? {
+            "IOHIDManagerOpen with seize failed: \(hexCode)." +
+                (isExclusiveAccess ? " Another app (e.g. Supernote Partner) is holding the device." : "")
+        }
+    }
+
     static let VID = 0x2207
     static let PID = 0x0007
 
@@ -18,6 +28,7 @@ final class SupernoteHID {
     private var rateCount: Int = 0
     private var lastRateReport: Date = Date()
     private(set) var matchedDeviceCount: Int = 0
+    private var scheduledRunLoop: CFRunLoop?
 
     init(mvm: MacOSVirtualMouse) {
         self.mvm = mvm
@@ -41,15 +52,14 @@ final class SupernoteHID {
 
         let res = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
         guard res == kIOReturnSuccess else {
-            throw NSError(domain: "IOHID", code: Int(res), userInfo: [
-                NSLocalizedDescriptionKey:
-                    "IOHIDManagerOpen with seize failed: 0x\(String(format:"%08x", res)). " +
-                    "Another app may be holding the device — try unplugging the Supernote and re-launching InkBridge."
-            ])
+            // A failed open can still leave some matched devices open.
+            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            throw OpenError(code: res)
         }
 
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(),
-                                        CFRunLoopMode.defaultMode.rawValue)
+        let runLoop = CFRunLoopGetCurrent()!
+        IOHIDManagerScheduleWithRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        scheduledRunLoop = runLoop
     }
 
     fileprivate func handleMatched(_ device: IOHIDDevice) {
@@ -90,7 +100,10 @@ final class SupernoteHID {
     }
 
     func stop() {
-        IOHIDManagerClose(manager, 0)
+        guard let runLoop = scheduledRunLoop else { return }
+        IOHIDManagerUnscheduleFromRunLoop(manager, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        scheduledRunLoop = nil
     }
 }
 

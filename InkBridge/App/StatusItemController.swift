@@ -74,29 +74,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
     }
 
-    func apply(_ state: InkFlowController.ConnectionState) {
+    static func statusText(for state: InkFlowController.ConnectionState) -> (title: String, detail: String?) {
         switch state {
         case .disconnected:
-            statusMenuItem.attributedTitle = nil
-            statusMenuItem.title = "Waiting for device…"
-            statusItem.button?.image = Self.menuBarImage(connected: false)
-            statusItem.button?.image?.isTemplate = true
+            return ("Waiting for device…", nil)
         case .connected(let name, let serial):
-            statusMenuItem.attributedTitle = Self.connectedTitle(name: name, serial: serial)
-            statusItem.button?.image = Self.menuBarImage(connected: true)
-            statusItem.button?.image?.isTemplate = true
+            return ("Connected: \(name)", serial)
+        case .busy:
+            return ("Supernote in use by another app",
+                    "Quit it (e.g. Supernote Partner), then unplug and replug the Supernote")
+        case .openFailed(let code):
+            return ("Couldn't open Supernote (error \(code))",
+                    "Unplug and replug the Supernote")
         }
     }
 
-    private static func connectedTitle(name: String, serial: String?) -> NSAttributedString {
+    func apply(_ state: InkFlowController.ConnectionState) {
+        let text = Self.statusText(for: state)
+        var connected = false
+        switch state {
+        case .disconnected:
+            statusMenuItem.attributedTitle = nil
+            statusMenuItem.title = text.title
+        case .connected:
+            connected = true
+            statusMenuItem.attributedTitle = Self.twoLineTitle(text.title, detail: text.detail)
+        case .busy, .openFailed:
+            statusMenuItem.attributedTitle = Self.twoLineTitle(text.title, detail: text.detail)
+        }
+        statusItem.button?.image = Self.menuBarImage(connected: connected)
+        statusItem.button?.image?.isTemplate = true
+    }
+
+    private static func twoLineTitle(_ primary: String, detail: String?) -> NSAttributedString {
         let title = NSMutableAttributedString()
         title.append(NSAttributedString(
-            string: "Connected: \(name)",
+            string: primary,
             attributes: [.font: NSFont.menuFont(ofSize: 0)]
         ))
-        if let serial = serial, !serial.isEmpty {
+        if let detail = detail, !detail.isEmpty {
             title.append(NSAttributedString(
-                string: "\n\(serial)",
+                string: "\n\(detail)",
                 attributes: [
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
                     .foregroundColor: NSColor.secondaryLabelColor,

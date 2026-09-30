@@ -4,10 +4,33 @@ import CoreGraphics
 
 final class InkFlowController {
 
-    enum ConnectionState {
+    enum ConnectionState: Equatable {
         case disconnected
         case connected(name: String, serial: String?)
+        case busy
+        case openFailed(code: String)
+
+        static func afterFailedOpen(_ error: Error) -> ConnectionState {
+            if let openError = error as? SupernoteHID.OpenError, !openError.isExclusiveAccess {
+                return .openFailed(code: openError.hexCode)
+            }
+            return .busy
+        }
+
+        func afterSuccessfulOpen() -> ConnectionState {
+            switch self {
+            case .busy, .openFailed: return .disconnected
+            default: return self
+            }
+        }
+
+        /// nil when nothing changes, so a retry every 2 s doesn't re-log or redraw the menu.
+        func changed(to next: ConnectionState) -> ConnectionState? {
+            next == self ? nil : next
+        }
     }
+
+    private static let retryInterval: TimeInterval = 2.0
 
     private(set) var state: ConnectionState = .disconnected {
         didSet { onStateChange?(state) }
@@ -25,6 +48,7 @@ final class InkFlowController {
     private var mvm: MacOSVirtualMouse?
     private var hid: SupernoteHID?
     private var screenChangeObserver: NSObjectProtocol?
+    private var retryTimer: Timer?
 
     init() {
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -60,13 +84,28 @@ final class InkFlowController {
             try hid.start()
             self.mvm = mvm
             self.hid = hid
+            retryTimer?.invalidate()
+            retryTimer = nil
+            if let next = state.changed(to: state.afterSuccessfulOpen()) { state = next }
         } catch {
-            NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
-            state = .disconnected
+            if let next = state.changed(to: .afterFailedOpen(error)) {
+                NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
+                state = next
+            }
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: Self.retryInterval, repeats: true) { [weak self] _ in
+            self?.start()
         }
     }
 
     func stop() {
+        retryTimer?.invalidate()
+        retryTimer = nil
         hid?.stop()
         hid = nil
         mvm = nil
