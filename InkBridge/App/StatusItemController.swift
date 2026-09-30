@@ -74,32 +74,36 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
     }
 
+    static func statusText(for state: InkFlowController.ConnectionState) -> (title: String, detail: String?) {
+        switch state {
+        case .disconnected:
+            return ("Waiting for device…", nil)
+        case .connected(let name, let serial):
+            return ("Connected: \(name)", serial)
+        case .busy:
+            return ("Supernote in use by another app",
+                    "Quit it (e.g. Supernote Partner), then unplug and replug the Supernote")
+        case .openFailed(let code):
+            return ("Couldn't open Supernote (error \(code))",
+                    "Unplug and replug the Supernote")
+        }
+    }
+
     func apply(_ state: InkFlowController.ConnectionState) {
+        let text = Self.statusText(for: state)
+        var connected = false
         switch state {
         case .disconnected:
             statusMenuItem.attributedTitle = nil
-            statusMenuItem.title = "Waiting for device…"
-            statusItem.button?.image = Self.menuBarImage(connected: false)
-            statusItem.button?.image?.isTemplate = true
-        case .connected(let name, let serial):
-            statusMenuItem.attributedTitle = Self.twoLineTitle("Connected: \(name)", detail: serial)
-            statusItem.button?.image = Self.menuBarImage(connected: true)
-            statusItem.button?.image?.isTemplate = true
-        case .busy:
-            statusMenuItem.attributedTitle = Self.twoLineTitle(
-                "Supernote in use by another app",
-                detail: "Quit it (e.g. Supernote Partner), then unplug and replug the Supernote"
-            )
-            statusItem.button?.image = Self.menuBarImage(connected: false)
-            statusItem.button?.image?.isTemplate = true
-        case .openFailed(let code):
-            statusMenuItem.attributedTitle = Self.twoLineTitle(
-                "Couldn't open Supernote (error \(code))",
-                detail: "Unplug and replug the Supernote"
-            )
-            statusItem.button?.image = Self.menuBarImage(connected: false)
-            statusItem.button?.image?.isTemplate = true
+            statusMenuItem.title = text.title
+        case .connected:
+            connected = true
+            statusMenuItem.attributedTitle = Self.twoLineTitle(text.title, detail: text.detail)
+        case .busy, .openFailed:
+            statusMenuItem.attributedTitle = Self.twoLineTitle(text.title, detail: text.detail)
         }
+        statusItem.button?.image = Self.menuBarImage(connected: connected)
+        statusItem.button?.image?.isTemplate = true
     }
 
     private static func twoLineTitle(_ primary: String, detail: String?) -> NSAttributedString {
