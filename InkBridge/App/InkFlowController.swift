@@ -23,6 +23,11 @@ final class InkFlowController {
             default: return self
             }
         }
+
+        /// nil when nothing changes, so a retry every 2 s doesn't re-log or redraw the menu.
+        func changed(to next: ConnectionState) -> ConnectionState? {
+            next == self ? nil : next
+        }
     }
 
     private static let retryInterval: TimeInterval = 2.0
@@ -81,11 +86,12 @@ final class InkFlowController {
             self.hid = hid
             retryTimer?.invalidate()
             retryTimer = nil
-            let next = state.afterSuccessfulOpen()
-            if next != state { state = next }
+            if let next = state.changed(to: state.afterSuccessfulOpen()) { state = next }
         } catch {
-            NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
-            state = .afterFailedOpen(error)
+            if let next = state.changed(to: .afterFailedOpen(error)) {
+                NSLog("InkBridge: hid.start() failed — \(error.localizedDescription)")
+                state = next
+            }
             scheduleRetry()
         }
     }

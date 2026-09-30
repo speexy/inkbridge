@@ -30,4 +30,19 @@ import Testing
     func successfulOpenKeepsOtherStates(_ state: State) {
         #expect(state.afterSuccessfulOpen() == state)
     }
+
+    @Test(arguments: [State.busy, .openFailed(code: "0xe00002e2")])
+    func repeatedFailureOnRetryIsNotReported(_ state: State) {
+        #expect(state.changed(to: state) == nil)
+    }
+
+    @Test func firstFailureIsReported() {
+        #expect(State.disconnected.changed(to: .busy) == .busy)
+    }
+
+    @Test func switchingBetweenFailureKindsIsReported() {
+        #expect(State.busy.changed(to: .openFailed(code: "0xe00002e2")) == .openFailed(code: "0xe00002e2"))
+        #expect(State.openFailed(code: "0xe00002e2").changed(to: .openFailed(code: "0xe00002bc"))
+                == .openFailed(code: "0xe00002bc"))
+    }
 }
